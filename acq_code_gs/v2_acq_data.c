@@ -7,12 +7,14 @@
 #include "acq_udp.h"
 
 #define  GET_SEQ_NUM(){				\
-    memcpy(&seq,sockpar->ubuf,UDP_HDR);		\
+    memcpy(&orig_seq,sockpar->ubuf+2,UDP_SEQ);		\
   }/* Get packet header*/
 #define  GET_MOD_NUM(){				\
-    memcpy(&mod_num,sockpar->ubuf+6,UDP_MOD);		\
+    memcpy(&mod_num,sockpar->ubuf+4,UDP_MOD);		\
   }/* Get packet header*/
 
+      /*fprintf(stderr, " Value of errno: %d\n ", errno); \
+	fprintf(stderr, "Value: %d\n", recvfrom(sockpar->fd,sockpar->ubuf,UDP_PAYLOAD,0,NULL,NULL));\*/
 #define GET_NEXT_PKT(){							\
     while(recvfrom(sockpar->fd,sockpar->ubuf,UDP_PAYLOAD,0,NULL,NULL)!=UDP_PAYLOAD){ \
       if(errno != EAGAIN){						\
@@ -23,11 +25,10 @@
     GET_SEQ_NUM();							\
     GET_MOD_NUM();							\
   }/*Get UDP_PAYLOAD size data packet from the socket*/
-
 static int DoFinish=0;
 void init_sock_stat(SockStat *stat);
 void report_socket_stat(SockStat *stat);
-int init_socket(SockPar *sockpar, int udp_port);
+int init_socket(SockPar *sockpar, const char *udp_port);
 int acquire_socket_data(SockPar *sockpar, int debug);
 int transfer_socket_data(SockPar *sockpar, int debug);
 
@@ -87,14 +88,14 @@ void report_socket_stat(SockStat *stat){
   return;
 }
 
-int init_socket(SockPar *sockpar, int udp_port){
+int init_socket(SockPar *sockpar, const char *udp_ip){
   int i,j;
 
   /* set the default socket parameters */
   sockpar->fd                   = -1;
   sockpar->addr.sin_family      = PF_INET;  
-  sockpar->addr.sin_addr.s_addr = inet_addr(UDP_IP);
-  sockpar->addr.sin_port        = htons(udp_port); 
+  sockpar->addr.sin_addr.s_addr = inet_addr(udp_ip);
+  sockpar->addr.sin_port        = htons(UDP_PORT); 
   /* set the accum buffer parameters */
   for(i=0;i<NSOCKBUF;i++){
     SockBuf *sbuf=sockpar->sbuf+i;
@@ -132,13 +133,15 @@ int acquire_socket_data(SockPar *sockpar, int debug){
 
   SockStat      *stat=&sockpar->stat;
   unsigned      i,j;
-  unsigned int seq,seq_tmp,last_seq;
+  unsigned int orig_seq, seq, seq_tmp,last_seq,counter = 0;
   unsigned char mod_num;
   int           ngood,ntry,idx;
   unsigned long offset=0;
 
   while(!DoFinish){
     GET_NEXT_PKT();
+    if(orig_seq == 65535) counter+=1;
+    seq =orig_seq+counter*(unsigned int)65535;
     if(sockpar->curr->start==0){
       // need to find a place to  start. Wait till we have 3 successive 
       // packets with consecutive packet numbers
@@ -151,6 +154,8 @@ int acquire_socket_data(SockPar *sockpar, int debug){
       ntry     = 0;
       while(ngood<3){
 	GET_NEXT_PKT();
+	if(orig_seq == 65535) counter+=1;
+	seq =orig_seq+counter*(unsigned int)65535;
 	if(seq-last_seq == 1) ngood++;
 	else ngood=0;
 	last_seq=seq; ntry++;
@@ -161,88 +166,88 @@ int acquire_socket_data(SockPar *sockpar, int debug){
       }
       fprintf(stderr,"acq: Starting with PktNo %ld\n",seq);
       sockpar->curr->start = seq;
-      sockpar->curr->stop  = seq+NACC; // first packet of next buffer
+      sockpar->curr->stop  = (seq+NACC); // first packet of next buffer
       sockpar->next->start = sockpar->curr->stop; 
-      sockpar->next->stop  = sockpar->next->start+NACC;
+      sockpar->next->stop  = (sockpar->next->start+NACC);
       clock_gettime(CLOCK_MONOTONIC,&stat->start);
       stat->dstart=stat->start;
     }
     
     /* copy packet data to the correct location, if possible */
-    if(seq >= sockpar->curr->start && seq < sockpar->curr->stop){
-        /* packet belongs to current buffer */
-        if (debug) fprintf(stderr,"mod number: %x, curr: %ld\n",mod_num, seq);
-        offset=(seq-sockpar->curr->start);
-        if(!sockpar->curr->flag[offset]){
-	        /* duplicate packet! */
-	        stat->bad++;stat->dbad++;
-        }else{
-            sockpar->curr->flag[offset]=0;
-            offset=offset*UDP_DATA;
-            memcpy(sockpar->curr->data+offset,sockpar->ubuf+UDP_HDR,UDP_DATA);
-            sockpar->curr->count++;
-            stat->got++; stat->dgot++;
-        }
-    }else if(seq >= sockpar->next->start && seq < sockpar->next->stop){
-        /* packet belongs to next buffer */
-        if (debug) fprintf(stderr,"mod number: %x, next: %ld\n",mod_num, seq);
-        offset=(seq-sockpar->next->start);
-        if(!sockpar->next->flag[offset]){
-            /* duplicate packet */
-            stat->bad++;stat->dbad++;
-        }else{
-            sockpar->next->flag[offset]=0;
-            offset=offset*UDP_DATA;
-            memcpy(sockpar->next->data+offset,sockpar->ubuf+UDP_HDR,UDP_DATA);
-            sockpar->next->count++;
-            stat->got++;stat->dgot++;
-        }
-    }else{
-	    /* packet is badly out of time, drop */
-        if (debug) fprintf(stderr,"pkt drop\n");
-	    stat->bad++;stat->dbad++;
-    }
+	    if(seq >= sockpar->curr->start && seq < sockpar->curr->stop){
+		/* packet belongs to current buffer */
+		offset=(seq-sockpar->curr->start);
+		if (debug && offset%1000 == 0) fprintf(stderr,"start: %d, stop: %d, mod number: %x, curr: %ld, offset: %d\n", sockpar->curr->start, sockpar->curr->stop, mod_num, seq, offset);
+		if(!sockpar->curr->flag[offset]){
+			/* duplicate packet! */
+			stat->bad++;stat->dbad++;
+		}else{
+		    sockpar->curr->flag[offset]=0;
+		    offset=offset*UDP_PAYLOAD;
+		    memcpy(sockpar->curr->data+offset,sockpar->ubuf,UDP_PAYLOAD);
+		    sockpar->curr->count++;
+		    stat->got++; stat->dgot++;
+		}
+	    }else if(seq >= sockpar->next->start && seq < sockpar->next->stop){
+		/* packet belongs to next buffer */
+		if (debug) fprintf(stderr,"mod number: %x, next: %ld\n",mod_num, seq);
+		offset=(seq-sockpar->next->start);
+		if(!sockpar->next->flag[offset]){
+		    /* duplicate packet */
+		    stat->bad++;stat->dbad++;
+		}else{
+		    sockpar->next->flag[offset]=0;
+		    offset=offset*UDP_PAYLOAD;
+		    memcpy(sockpar->next->data+offset,sockpar->ubuf,UDP_PAYLOAD);
+		    sockpar->next->count++;
+		    stat->got++;stat->dgot++;
+		}
+	    }else{
+		    /* packet is badly out of time, drop */
+		if (debug) fprintf(stderr,"pkt drop\n");
+		    stat->bad++;stat->dbad++;
+	    }
 
-    if((sockpar->curr->count == NACC) || 
-       (sockpar->next->count > sockpar->switch_thresh*NACC)){
-      /* update number of lost packets */
-      stat->total         += NACC;
-      stat->dtotal        += NACC;
-      stat->lost          += (NACC-sockpar->curr->count);
-      stat->dlost         += (NACC-sockpar->curr->count);
-      sockpar->copy        = sockpar->curr;
-      sockpar->curr        = sockpar->next;
-      /* update the "next" buffer pointer and preflag all data */
-      idx                  = (sockpar->next->idx+1)%NSOCKBUF;
-      sockpar->next        = sockpar->sbuf+idx;
-      sockpar->next->count = 0;
-      sockpar->next->start = sockpar->curr->stop;
-      sockpar->next->stop  = sockpar->next->start+NACC;
-      for(i=0;i<NACC;i++) sockpar->next->flag[i]=1;
-    }
+	    if((sockpar->curr->count == NACC) || 
+	       (sockpar->next->count > sockpar->switch_thresh*NACC)){
+	      /* update number of lost packets */
+	      stat->total         += NACC;
+	      stat->dtotal        += NACC;
+	      stat->lost          += (NACC-sockpar->curr->count);
+	      stat->dlost         += (NACC-sockpar->curr->count);
+	      sockpar->copy        = sockpar->curr;
+	      sockpar->curr        = sockpar->next;
+	      /* update the "next" buffer pointer and preflag all data */
+	      idx                  = (sockpar->next->idx+1)%NSOCKBUF;
+	      sockpar->next        = sockpar->sbuf+idx;
+	      sockpar->next->count = 0;
+	      sockpar->next->start = sockpar->curr->stop;
+	      sockpar->next->stop  = sockpar->next->start+NACC;
+	      for(i=0;i<NACC;i++) sockpar->next->flag[i]=1;
+	    }
 
-    /*Restart if you get a bunch of bad packets*/
-    if(stat->bad > 0.75*NACC){
-      fprintf(stderr,"\n\nGot a lot of bad packets. Resetting.\n\n");
-      //TODO: Transfer useful data before this
-      GET_NEXT_PKT()
-      sockpar->curr->start = seq;
-      sockpar->curr->stop  = seq+NACC;
-      sockpar->next->start = sockpar->curr->stop;
-      sockpar->next->stop  = sockpar->next->start+NACC;
-      for(i=0;i<3;i++){
-      	SockBuf *sbuf=sockpar->sbuf+i;
-      	for(j=0;j<NACC;j++)sbuf->flag[j]=1; // pre-flag data
-      }
-      clock_gettime(CLOCK_MONOTONIC,&stat->start);
-      stat->dstart=stat->start;
-      stat->bad=0;
-      stat->got=0; //to reset statistics info
-    }
+	    /*Restart if you get a bunch of bad packets*/
+	    if(stat->bad > 0.75*NACC){
+	      fprintf(stderr,"\n\nGot a lot of bad packets. Resetting.\n\n");
+	      //TODO: Transfer useful data before this
+	      GET_NEXT_PKT()
+	      sockpar->curr->start = seq;
+	      sockpar->curr->stop  = seq+NACC;
+	      sockpar->next->start = sockpar->curr->stop;
+	      sockpar->next->stop  = sockpar->next->start+NACC;
+	      for(i=0;i<3;i++){
+		SockBuf *sbuf=sockpar->sbuf+i;
+		for(j=0;j<NACC;j++)sbuf->flag[j]=1; // pre-flag data
+	      }
+	      clock_gettime(CLOCK_MONOTONIC,&stat->start);
+	      stat->dstart=stat->start;
+	      stat->bad=0;
+	      stat->got=0; //to reset statistics info
+	    }
 
-    /* report statististics periodically */
-    if((stat->dgot + stat->dbad) == stat->log_rate)
-      report_socket_stat(stat);
+	    /* report statististics periodically */
+	    if((stat->dgot + stat->dbad) == stat->log_rate)
+	      report_socket_stat(stat);
 
   }//DoFinish
     
@@ -251,7 +256,6 @@ int acquire_socket_data(SockPar *sockpar, int debug){
       free(sockpar->sbuf[i].data);
       free(sockpar->sbuf[i].flag);
     }
-
     return 1;
 }
 
@@ -260,6 +264,7 @@ int transfer_socket_data(SockPar *sockpar, int debug){
   unsigned int     max_pkt = (FILESIZE*1024*1024)/ACC_BUFSIZE;
   unsigned int     npkt=0,i,idx0,idx,sleep_time,cnt=0;
   char             filename[50];
+  char 		   buffer[50];
   SockBuf          *idxc;
   FILE             *fp;
   struct tm        *now;
@@ -274,10 +279,15 @@ int transfer_socket_data(SockPar *sockpar, int debug){
   /* Include time and date info in the data file*/
   time(&rawtime);
   now = localtime(&rawtime);
-  strftime(filename,sizeof(filename),"data_%s.bin",now);	
+  strftime(buffer,sizeof(buffer),"%s",now);	
+  sprintf(filename,"data_%s_%d.bin", buffer, sockpar->fd);
   fp=fopen(filename,"a+");
+  fprintf(stderr, "FILENAME: %s\n", filename);
   
   while(!DoFinish){
+     //fprintf(stderr, "%d\n", sockpar->copy == NULL);
+    	//fprintf(stderr, "idxo0: %d\n", idx0);
+        //fprintf(stderr, "idxo: %u\n", sockpar->curr);
     if(sockpar->copy != NULL && (idx=sockpar->copy->idx) != idx0){
       /* got fresh data*/
       if (debug) fprintf(stderr,"idx: %d\tidx0: %d\n",idx,idx0);
@@ -292,11 +302,13 @@ int transfer_socket_data(SockPar *sockpar, int debug){
 	npkt=0;
 	time(&rawtime);
 	now = localtime(&rawtime);
-	strftime(filename,sizeof(filename),"data_%s.bin",now);	
+	strftime(buffer,sizeof(buffer),"%s",now);	
+	sprintf(filename,"data_%s_%d.bin", buffer, sockpar->fd);
 	fp=fopen(filename,"a+");
+  	fprintf(stderr, "FILENAME: %s\n", filename);
       }
-      fwrite(idxc->data, UDP_DATA, NACC, fp);
-      fwrite(idxc->flag, sizeof(unsigned char), NACC, fp);
+      fwrite(idxc->data, UDP_PAYLOAD, NACC, fp);
+      //fwrite(idxc->flag, sizeof(unsigned char), NACC, fp);
       npkt++;
     }else{ /* data not available yet, check again*/
       usleep(sleep_time);
@@ -350,9 +362,11 @@ int main(int argc, char **argv){
     }
   }
 
+  const char *ip_addr[NUM_MOD];
+  ip_addr[0] = "192.168.1.100"; 
   for(int j = 0; j < NUM_MOD; j++){
         stat[j]=sockpar[j].stat;
-  	init_socket(&sockpar[j], 10000+j);
+  	init_socket(&sockpar[j], ip_addr[j]);
 	  /* open the socket and bind to the specified address */
 	  if((sockpar[j].fd=socket(AF_INET,SOCK_DGRAM|SOCK_NONBLOCK,IPPROTO_UDP))<0){
 	    perror("acq: Can't open socket");
@@ -373,12 +387,13 @@ int main(int argc, char **argv){
 
 
 
-#pragma omp parallel num_threads(NUM_MOD) private (tid) shared(sockpar)
+#pragma omp parallel num_threads(2*(int)NUM_MOD) private (tid) shared(sockpar)
   { tid  = omp_get_thread_num(); 
     if(tid<NUM_MOD){
+   	fprintf(stderr, "tid: %d\n", tid);
       acquire_socket_data(&sockpar[tid],debug);  // copy data from socket 
     }else{
-      transfer_socket_data(&sockpar[tid],debug); //transfer socket data
+      transfer_socket_data(&sockpar[tid-NUM_MOD],debug); //transfer socket data
     }
   }
 

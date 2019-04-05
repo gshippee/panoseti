@@ -10,8 +10,9 @@
 #include <string.h>
 #include <sys/time.h>
 #include <time.h>
+#include "acq_udp.h"
 
-#define NUM_CLIENTS	8
+//#define NUM_MOD	NUM_MOD
 #define UDP_HDR        16                        //UDP pkt HDRsize (bytes)
 
 #define UDP_DATA       512                     //UDP pkt DATAsize (8192 bytes)
@@ -45,8 +46,8 @@ int main(void){
   double dt;
   int i,tid;
   int first_loop = 0;
-  Client client[NUM_CLIENTS];
-  for(int j = 0; j <= NUM_CLIENTS;j++){
+  Client client[NUM_MOD];
+  for(int j = 0; j <= NUM_MOD;j++){
 	  client[j].slen=sizeof(client[j].s_serv);
 	  if ((client[j].soc = socket(AF_INET, SOCK_DGRAM, 0))<0) 
 	    perror("Cannot create socket");
@@ -90,7 +91,7 @@ int main(void){
   start.slen=sizeof(start.s_serv);
   gettimeofday(&start_time,NULL);
   int sending = sendto(start.soc, start.buf, UDP_PAYLOAD, 0, (struct sockaddr *)&start.s_serv, start.slen);
-#pragma omp parallel num_threads(NUM_CLIENTS) private (tid) 
+#pragma omp parallel num_threads(NUM_MOD) private (tid) 
   { 
     while ((*client[0].pkt_no)!=MAX_PKTS){
     tid = omp_get_thread_num();
@@ -100,8 +101,8 @@ int main(void){
     gettimeofday(&curr_time,NULL);
     dt=(curr_time.tv_sec + curr_time.tv_usec/1.0e6)-(start_time.tv_sec + start_time.tv_usec/1.0e6);
     
-    fprintf(stderr, "Data rate: %10.2f (Mbytes/sec)\n", (double)NUM_CLIENTS*(double)MAX_PKTS*(double)UDP_PAYLOAD/(1024.0*1024.0*dt));
-  for(int k =0;k<=NUM_CLIENTS;k++){ 
+    fprintf(stderr, "Data rate: %10.2f (Mbytes/sec)\n", (double)NUM_MOD*(double)MAX_PKTS*(double)UDP_PAYLOAD/(1024.0*1024.0*dt));
+  for(int k =0;k<=NUM_MOD;k++){ 
     close(start.soc);
   }
   return 0;

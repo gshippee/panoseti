@@ -10,8 +10,8 @@
 #include <netdb.h>
 #include <time.h>
 
-#define NUM_MOD		 8
-#define UDP_SEQ		 4			  // UDP pkt seq length (bytes)
+#define NUM_MOD		 1
+#define UDP_SEQ		 2			  // UDP pkt seq length (bytes)
 #define UDP_MOD		 1			  // UDP pkt module (bytes)
 #define UDP_QUAD	 1			  // UDP pkt quadrant (bytes)
 #define UDP_HDR         16                        // UDP pkt HDRsize (bytes)
@@ -22,11 +22,11 @@
                                                   // accumulate per buffer
 #define ACC_BUFSIZE   (NACC*UDP_PAYLOAD)          // Data accumulate buffer size
 #define ACC_FLGSIZE    NACC                       // flg accumulate buffer size
-#define FILESIZE        102                       // File size for data storage in MB
+#define FILESIZE        10                       // File size for data storage in MB
 
 //#define UDP_IP        "10.0.10.10"                // default ip addr
-#define UDP_IP        "127.0.0.1"                // default ip addr
-#define UDP_PORT       10000                      // default port number
+#define UDP_IP        "192.168.1.100"                // default ip addr
+#define UDP_PORT       60001                      // default port number
 
 typedef struct {
 	unsigned int start_seq;

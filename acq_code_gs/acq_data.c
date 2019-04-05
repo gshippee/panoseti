@@ -7,13 +7,13 @@
 #include "acq_udp.h"
 
 #define GET_MOD_NUM(){				\
-    memcpy(&mod,sockpar->ubuf+6,UDP_MOD);	\
+    memcpy(&mod,sockpar->ubuf+4,UDP_MOD);	\
   }/* Get packet header*/
 #define GET_QUAD_NUM(){				\
-    memcpy(&quad,sockpar->ubuf+7,UDP_QUAD);	\
+    memcpy(&quad,sockpar->ubuf+5,UDP_QUAD);	\
   }/* Get packet header*/
 #define GET_SEQ_NUM(){				\
-    memcpy(&seq,sockpar->ubuf,UDP_SEQ);		\
+    memcpy(&seq,sockpar->ubuf+2,UDP_SEQ);		\
   }/* Get packet header*/
 
 #define GET_NEXT_PKT(){							\
@@ -144,6 +144,7 @@ int acquire_socket_data(SockPar *sockpar, int debug, unsigned char req_mod, unsi
 
   while(!DoFinish){
     GET_NEXT_PKT();
+    fprintf(stderr,"curr: %ld, module: %x, quadrant %x\n",seq, mod, quad);
     if (mod == req_mod && quad == req_quad){
     //fprintf(stderr,"curr: %ld, module: %x, quadrant %x, %x, %x\n",seq, mod, quad, req_mod, req_quad);
 	    if(sockpar->curr->start==0 && first_time==0){
@@ -159,7 +160,6 @@ int acquire_socket_data(SockPar *sockpar, int debug, unsigned char req_mod, unsi
 	      while(ngood<3){
 		GET_NEXT_PKT();
     		if (mod == req_mod && quad == req_quad){
-			//fprintf(stderr,"curr: %ld, module: %x, quadrant %x\n",seq, mod, quad);
 			if(seq-last_seq == 1) ngood++;
 			else ngood=0;
 			last_seq=seq; ntry++;
@@ -301,7 +301,9 @@ int transfer_socket_data(SockPar *sockpar, int debug){
   fp=fopen(filename,"a+");
   
   while(!DoFinish){
+    //fprintf(stderr, "AAAAA");
     if(sockpar->copy != NULL && (idx=sockpar->copy->idx) != idx0){
+    fprintf(stderr, "BBBBB");
       /* got fresh data*/
       if (debug) fprintf(stderr,"idx: %d\tidx0: %d\n",idx,idx0);
       if(idx != (idx0+1)%NSOCKBUF) // missed at least one buf!
@@ -318,8 +320,8 @@ int transfer_socket_data(SockPar *sockpar, int debug){
 	strftime(filename,sizeof(filename),"data_%s.bin",now);	
 	fp=fopen(filename,"a+");
       }
-      fwrite(idxc->data, UDP_DATA, NACC, fp);
-      fwrite(idxc->flag, sizeof(unsigned char), NACC, fp);
+      fwrite(idxc->data, UDP_PAYLOAD, NACC, fp);
+      //fwrite(idxc->flag, sizeof(unsigned char), NACC, fp);
       npkt++;
     }else{ /* data not available yet, check again*/
       usleep(sleep_time);
@@ -338,7 +340,7 @@ int main(int argc, char **argv){
   char		   req_quad;
   int              sockbufsize=1024*1024*1024; // 512 MB socket buffer
   int              debug = 0;
-  Module module[NUM_MODULES];
+  Module module[NUM_MOD];
 
 
   /* check if the user want's to override the defaults */
